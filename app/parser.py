@@ -45,12 +45,12 @@ def find_text_value(text: str, patterns: list[str]) -> str | None:
 def extract_screening_features(ocr_text: str) -> dict[str, Any]:
     text = normalize_text(ocr_text)
     features = {
-        "age": find_number(text, [r"возраст[^0-9]{0,30}(?P<value>\d{1,2})", r"age[^0-9]{0,30}(?P<value>\d{1,2})"]),
-        "height": find_number(text, [r"рост[^0-9]{0,30}(?P<value>\d{2,3})", r"height[^0-9]{0,30}(?P<value>\d{2,3})"]),
-        "weight": find_number(text, [r"вес[^0-9]{0,30}(?P<value>\d{2,3}(?:[\.,]\d+)?)", r"weight[^0-9]{0,30}(?P<value>\d{2,3}(?:[\.,]\d+)?)"]),
-        "bmi": find_number(text, [r"имт[^0-9]{0,30}(?P<value>\d{1,2}(?:[\.,]\d+)?)", r"bmi[^0-9]{0,30}(?P<value>\d{1,2}(?:[\.,]\d+)?)"]),
-        "gestational_weeks": find_number(text, [r"срок[^0-9]{0,30}(?P<value>\d{1,2})\s*(?:нед|weeks)", r"гестационн\w*\s*возраст[^0-9]{0,30}(?P<value>\d{1,2})\s*(?:нед|weeks)"]),
-        "gestational_days": find_number(text, [r"срок[^\\n]{0,60}\d{1,2}\s*(?:нед|weeks)[^0-9]{0,20}(?P<value>\d)\s*(?:дн|days)", r"гестационн\w*\s*возраст[^\\n]{0,60}\d{1,2}\s*(?:нед|weeks)[^0-9]{0,20}(?P<value>\d)\s*(?:дн|days)"]),
+        "age_final": find_number(text, [r"возраст[^0-9]{0,30}(?P<value>\d{1,2})", r"age[^0-9]{0,30}(?P<value>\d{1,2})"]),
+        "height_final": find_number(text, [r"рост[^0-9]{0,30}(?P<value>\d{2,3})", r"height[^0-9]{0,30}(?P<value>\d{2,3})"]),
+        "weight_final": find_number(text, [r"вес[^0-9]{0,30}(?P<value>\d{2,3}(?:[\.,]\d+)?)", r"weight[^0-9]{0,30}(?P<value>\d{2,3}(?:[\.,]\d+)?)"]),
+        "bmi_final": find_number(text, [r"имт[^0-9]{0,30}(?P<value>\d{1,2}(?:[\.,]\d+)?)", r"bmi[^0-9]{0,30}(?P<value>\d{1,2}(?:[\.,]\d+)?)"]),
+        "screening_weeks": find_number(text, [r"срок[^0-9]{0,30}(?P<value>\d{1,2})\s*(?:нед|weeks)", r"гестационн\w*\s*возраст[^0-9]{0,30}(?P<value>\d{1,2})\s*(?:нед|weeks)"]),
+        "screening_days": find_number(text, [r"срок[^\\n]{0,60}\d{1,2}\s*(?:нед|weeks)[^0-9]{0,20}(?P<value>\d)\s*(?:дн|days)", r"гестационн\w*\s*возраст[^\\n]{0,60}\d{1,2}\s*(?:нед|weeks)[^0-9]{0,20}(?P<value>\d)\s*(?:дн|days)"]),
         "crl": find_number(text, [r"(?:ктр|crl)[^0-9]{0,30}(?P<value>\d{1,3}(?:[\.,]\d+)?)"]),
         "nt": find_number(text, [r"(?:твп|nt|воротников\w*\s*пространств\w*)[^0-9]{0,30}(?P<value>\d{1,2}(?:[\.,]\d+)?)"]),
         "fhr": find_number(text, [r"(?:чсс|fhr)[^0-9]{0,30}(?P<value>\d{2,3})"]),
@@ -64,15 +64,15 @@ def extract_screening_features(ocr_text: str) -> dict[str, Any]:
         "nasal_bone": find_text_value(text, [r"(?:носов\w*\s*кость|nasal\s*bone)[^:\n]{0,20}[:\-]?\s*(?P<value>[^\n\r]{2,80})"]),
     }
 
-    if features["bmi"] is None and features["height"] and features["weight"]:
-        height_m = features["height"] / 100
-        features["bmi"] = round(features["weight"] / (height_m ** 2), 2)
+    if features["bmi_final"] is None and features["height_final"] and features["weight_final"]:
+        height_m = features["height_final"] / 100
+        features["bmi_final"] = round(features["weight_final"] / (height_m ** 2), 2)
 
-    if features["gestational_weeks"] is not None:
-        days = features["gestational_days"] or 0
-        features["gestational_age_decimal"] = round(features["gestational_weeks"] + days / 7, 2)
+    if features["screening_weeks"] is not None:
+        days = features["screening_days"] or 0
+        features["screening_ga_weeks"] = round(features["screening_weeks"] + days / 7, 2)
     else:
-        features["gestational_age_decimal"] = None
+        features["screening_ga_weeks"] = None
 
     return features
 
@@ -80,13 +80,23 @@ def extract_screening_features(ocr_text: str) -> dict[str, Any]:
 def features_to_dataframe(features: dict[str, Any]) -> pd.DataFrame:
     rows = []
     names = {
-        "age": "Возраст", "height": "Рост, см", "weight": "Вес, кг", "bmi": "ИМТ",
-        "gestational_weeks": "Срок, недели", "gestational_days": "Срок, дни",
-        "gestational_age_decimal": "Срок, недель десятичный", "crl": "КТР / CRL, мм",
-        "nt": "ТВП / NT, мм", "fhr": "ЧСС плода / FHR", "pappa": "PAPP-A",
-        "pappa_mom": "PAPP-A MoM", "fbhcg": "Свободный β-ХГЧ",
-        "fbhcg_mom": "Свободный β-ХГЧ MoM", "ua_left_pi": "PI левой маточной артерии",
-        "ua_right_pi": "PI правой маточной артерии", "uapi_mean": "Средний PI маточных артерий",
+        "age_final": "Возраст",
+        "height_final": "Рост, см",
+        "weight_final": "Вес, кг",
+        "bmi_final": "ИМТ",
+        "screening_weeks": "Срок, недели",
+        "screening_days": "Срок, дни",
+        "screening_ga_weeks": "Срок, недель десятичный",
+        "crl": "КТР / CRL, мм",
+        "nt": "ТВП / NT, мм",
+        "fhr": "ЧСС плода / FHR",
+        "pappa": "PAPP-A",
+        "pappa_mom": "PAPP-A MoM",
+        "fbhcg": "Свободный β-ХГЧ",
+        "fbhcg_mom": "Свободный β-ХГЧ MoM",
+        "ua_left_pi": "PI левой маточной артерии",
+        "ua_right_pi": "PI правой маточной артерии",
+        "uapi_mean": "Средний PI маточных артерий",
         "nasal_bone": "Носовая кость",
     }
 

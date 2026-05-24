@@ -5,17 +5,60 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
+from sklearn.utils.class_weight import compute_sample_weight
 
 
-class MultiLabelBinaryModel:
-    def __init__(self, base_estimator=None, label_columns=None, use_sample_weight=True):
+class MultiLabelBinaryModel(BaseEstimator, ClassifierMixin):
+    """
+    Multi-label классификатор как набор бинарных моделей.
+    Важно: должен наследоваться от BaseEstimator, иначе sklearn Pipeline
+    может падать на check_is_fitted.
+    """
+
+    def __init__(
+            self,
+            base_estimator=None,
+            label_columns=None,
+            use_sample_weight=True,
+    ):
         self.base_estimator = base_estimator
         self.label_columns = label_columns
         self.use_sample_weight = use_sample_weight
+
+    def fit(self, X, y):
         self.models_ = {}
 
+        for label in self.label_columns:
+            y_label = y[label].astype(int).values
+
+            if isinstance(self.base_estimator, dict):
+                model = clone(self.base_estimator[label])
+            else:
+                model = clone(self.base_estimator)
+
+            fit_kwargs = {}
+
+            if self.use_sample_weight:
+                try:
+                    fit_kwargs["sample_weight"] = compute_sample_weight(
+                        class_weight="balanced",
+                        y=y_label,
+                    )
+                except Exception:
+                    fit_kwargs = {}
+
+            try:
+                model.fit(X, y_label, **fit_kwargs)
+            except TypeError:
+                model.fit(X, y_label)
+
+            self.models_[label] = model
+
+        return self
+
     def predict_proba(self, X):
-        if not self.models_:
+        if not hasattr(self, "models_") or not self.models_:
             raise RuntimeError("Model is not fitted")
 
         proba = {}
@@ -40,14 +83,19 @@ class MultiLabelBinaryModel:
 
     def predict(self, X, thresholds=None):
         proba = self.predict_proba(X)
-        thresholds = thresholds or {label: 0.5 for label in self.label_columns}
+
+        if thresholds is None:
+            thresholds = {label: 0.5 for label in proba.columns}
 
         pred = pd.DataFrame(index=proba.index)
 
-        for label in self.label_columns:
+        for label in proba.columns:
             pred[label] = (proba[label] >= thresholds.get(label, 0.5)).astype(int)
 
         return pred
+
+    def __sklearn_is_fitted__(self):
+        return hasattr(self, "models_") and bool(self.models_)
 
 
 DEFAULT_MODEL_PATH = Path("artifacts/screening_ocr.joblib")
@@ -63,13 +111,13 @@ LABEL_RU = {
 
 
 FEATURE_COLUMNS = [
-    "age",
-    "height",
-    "weight",
-    "bmi",
-    "gestational_weeks",
-    "gestational_days",
-    "gestational_age_decimal",
+    "age_final",
+    "height_final",
+    "weight_final",
+    "bmi_final",
+    "screening_weeks",
+    "screening_days",
+    "screening_ga_weeks",
     "crl",
     "nt",
     "fhr",
@@ -80,6 +128,7 @@ FEATURE_COLUMNS = [
     "ua_left_pi",
     "ua_right_pi",
     "uapi_mean",
+    "nasal_bone",
 ]
 
 
@@ -95,7 +144,8 @@ def load_model(model_path: Path = DEFAULT_MODEL_PATH):
 
 
 def predict_complications(features: dict, model_path: Path = DEFAULT_MODEL_PATH) -> tuple[pd.DataFrame, pd.DataFrame]:
-    model = load_model(model_path)
+    artifact = load_model(model_path)
+    model = artifact['pipeline']
     X = features_to_model_input(features)
 
     proba = model.predict_proba(X)
