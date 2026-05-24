@@ -5,6 +5,7 @@ import streamlit as st
 from .config import APP_TITLE, OCR_LANG, POPPLER_PATH, TESSERACT_CMD
 from .ocr import configure_external_tools, read_pdf_with_ocr
 from .parser import extract_screening_features, features_to_dataframe
+from .predictor import DEFAULT_MODEL_PATH, format_predictions, predict_complications
 
 
 def main() -> None:
@@ -42,7 +43,7 @@ def main() -> None:
         features = extract_screening_features(ocr_text)
         features_df = features_to_dataframe(features)
 
-        tab_features, tab_text, tab_json = st.tabs(["Извлечённые признаки", "Полный OCR-текст", "JSON"])
+        tab_features, tab_predict, tab_text, tab_json = st.tabs(["Извлечённые признаки", "Предсказание осложнений", "Полный OCR-текст", "JSON"])
 
         with tab_features:
             st.subheader("Признаки, найденные в PDF")
@@ -53,6 +54,27 @@ def main() -> None:
                 file_name="ocr_features.csv",
                 mime="text/csv",
             )
+
+
+        with tab_predict:
+            st.subheader("Прогноз осложнений")
+            if not DEFAULT_MODEL_PATH.exists():
+                st.warning(f"Файл модели не найден: `{DEFAULT_MODEL_PATH}`")
+            else:
+                try:
+                    proba_df, pred_df = predict_complications(features, model_path=DEFAULT_MODEL_PATH)
+                    result_df = format_predictions(proba_df, pred_df)
+                    result_df["Вероятность"] = result_df["Вероятность"].map(lambda x: f"{x:.1%}")
+                    st.dataframe(result_df, width="stretch", hide_index=True)
+                    st.download_button(
+                        label="Скачать прогноз CSV",
+                        data=result_df.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="complications_prediction.csv",
+                        mime="text/csv",
+                    )
+                except Exception as exc:
+                    st.error("Не удалось выполнить предсказание осложнений.")
+                    st.exception(exc)
 
         with tab_text:
             st.subheader("Распознанный OCR-текст")
