@@ -9,12 +9,7 @@ import streamlit as st
 from pdf2image import convert_from_path
 from PIL import Image
 
-from .config import OCR_LANG, POPPLER_PATH, TESSERACT_CMD
-
-
-def configure_external_tools() -> None:
-    if TESSERACT_CMD:
-        pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+from .config import OCR_LANG
 
 
 def preprocess_image(pil_image: Image.Image) -> np.ndarray:
@@ -32,7 +27,7 @@ def save_uploaded_pdf_to_temp(uploaded_file) -> str:
 
 
 def convert_pdf_to_images(pdf_path: str, dpi: int) -> list[Image.Image]:
-    return convert_from_path(pdf_path, dpi=dpi, poppler_path=POPPLER_PATH)
+    return convert_from_path(pdf_path, dpi=dpi)
 
 
 def image_to_text(image: Image.Image, page_number: int) -> str:
@@ -41,7 +36,7 @@ def image_to_text(image: Image.Image, page_number: int) -> str:
     return f"\n--- PAGE {page_number} ---\n{text}"
 
 
-def read_pdf_with_ocr(uploaded_file, dpi: int = 300) -> str:
+def read_pdf_with_ocr(uploaded_file, dpi: int = 400) -> str:
     pdf_path = save_uploaded_pdf_to_temp(uploaded_file)
     pages = convert_pdf_to_images(pdf_path, dpi=dpi)
 

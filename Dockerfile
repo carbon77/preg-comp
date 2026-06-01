@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # System dependencies
 RUN apt-get update && apt-get install -y \
@@ -20,12 +20,7 @@ WORKDIR /app
 # Copy dependency files first
 COPY pyproject.toml uv.lock* requirements.txt* ./
 
-# Install dependencies
-RUN if [ -f pyproject.toml ]; then \
-        uv sync; \
-    elif [ -f requirements.txt ]; then \
-        uv pip install --system -r requirements.txt; \
-    fi
+RUN uv sync --locked
 
 # Copy project
 COPY . .
