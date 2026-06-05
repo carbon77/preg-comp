@@ -66,18 +66,6 @@ def _load_autogluon_predictors(
         artifact_path: str | Path = DEFAULT_MODEL_PATH,
         ag_dir: str | Path = MODEL_PREDICTORS_DIR,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """
-    Загружает AutoGluon artifact из ноутбука.
-
-    В ноутбуке сохраняется joblib с метаданными:
-    - autogluon_dir;
-    - thresholds;
-    - train_labels;
-    - feature_columns.
-
-    Сами модели лежат в папках:
-    artifacts/ag_predictors/<label>/
-    """
     artifact_path = Path(artifact_path)
     if not artifact_path.exists():
         raise FileNotFoundError(f"Файл AutoGluon artifact не найден: {artifact_path}")
@@ -91,27 +79,21 @@ def _load_autogluon_predictors(
             f"Путь из artifact: {artifact['autogluon_dir']}. "
         )
 
-    train_labels = artifact.get("train_labels") or artifact.get("label_columns") or COMPLICATION_LABELS
+    train_labels = artifact.get("train_labels") or COMPLICATION_LABELS
     train_labels = [label for label in train_labels if label != "label_normal"]
 
     predictors: dict[str, Any] = {}
-    missing_predictors: list[str] = []
-
     for label in train_labels:
         label_dir = ag_dir / label
         if not label_dir.exists():
-            missing_predictors.append(label)
-            continue
-        predictors[label] = TabularPredictor.load(str(label_dir))
-
-    if missing_predictors:
-        raise FileNotFoundError(
-            "Не найдены папки AutoGluon predictor для меток: "
-            + ", ".join(missing_predictors)
-            + f". Ожидаемый корень: {ag_dir}"
-        )
+            raise FileNotFoundError(f'Не найдена папка predictor для {label}: {label_dir}')
+        predictors[label] = TabularPredictor.load(str(label_dir), require_py_version_match=False)
 
     artifact["resolved_autogluon_dir"] = str(ag_dir)
+    artifact['thresholds'] = {
+        label: float(predictor.decision_threshold)
+        for label, predictor in predictors.items()
+    }
     return predictors, artifact
 
 def _positive_class_probability(predictor: Any, X: pd.DataFrame) -> np.ndarray:
@@ -141,17 +123,6 @@ def _autogluon_predict_proba_multilabel(
         for label, predictor in predictors.items()
     }
     return pd.DataFrame(proba, index=X.index)
-
-
-def _apply_thresholds(
-        proba: pd.DataFrame,
-        thresholds: dict[str, float] | None = None,
-) -> pd.DataFrame:
-    thresholds = thresholds or {}
-    pred = pd.DataFrame(index=proba.index)
-    for label in proba.columns:
-        pred[label] = (proba[label] >= float(thresholds.get(label, 0.5))).astype(int)
-    return pred
 
 
 def _add_derived_normal(
@@ -229,6 +200,16 @@ def load_model(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     return _load_autogluon_predictors(model_path)
 
+def _autogluon_predict_multilabel(
+    predictors: dict[str, Any],
+    X: pd.DataFrame,
+) -> pd.DataFrame:
+    pred = {}
+
+    for label, predictor in predictors.items():
+        pred[label] = predictor.predict(X).astype(int).values
+    return pd.DataFrame(pred, index=X.index)
+
 
 def predict_complications(
         features: dict[str, Any] | pd.DataFrame,
@@ -242,26 +223,38 @@ def predict_complications(
         raise KeyError("В AutoGluon artifact нет 'feature_columns'. Сохрани artifact заново из ноутбука.")
 
     X = features_to_model_input(features, feature_columns=feature_columns)
-    proba = _autogluon_predict_proba_multilabel(predictors, X)
-    pred = _apply_thresholds(proba, artifact.get("thresholds"))
 
+    proba = _autogluon_predict_proba_multilabel(predictors, X)
+    pred = _autogluon_predict_multilabel(predictors, X)
+
+    thresholds = {
+        label: float(predictor.decision_threshold)
+        for label, predictor in predictors.items()
+    }
     if derive_normal and "label_normal" not in proba.columns:
         proba, pred = _add_derived_normal(
             proba=proba,
             pred=pred,
-            complication_labels=[c for c in artifact.get("train_labels", COMPLICATION_LABELS) if c != "label_normal"],
+            complication_labels=[
+                c for c in artifact.get("train_labels", COMPLICATION_LABELS) 
+                if c != "label_normal"
+            ],
         )
 
     return proba, pred, artifact['thresholds']
 
 
-def format_predictions(proba: pd.DataFrame, pred: pd.DataFrame, thresholds: dict[str, float]) -> pd.DataFrame:
+def format_predictions(
+        proba: pd.DataFrame,
+        pred: pd.DataFrame,
+        thresholds: dict[str, float],
+) -> pd.DataFrame:
     rows = []
     for label in proba.columns:
         if label == "label_normal":
             threshold = np.nan
         else:
-            threshold = round(thresholds[label] * 100, 2) 
+            threshold = round(thresholds.get(label, np.nan), 4) 
         rows.append(
             {
                 "Код": label,
@@ -361,8 +354,7 @@ def get_shap_interpretation(
     if len(X_patient) != 1:
         raise ValueError("Для локального объяснения нужна ровно одна строка.")
 
-    proba = _autogluon_predict_proba_multilabel(predictors, X_patient)
-    pred = _apply_thresholds(proba, artifact.get("thresholds"))
+    pred = _autogluon_predict_multilabel(predictors, X_patient)
     background = _load_background(background_path, feature_columns, max_background_rows=max_background_rows)
 
     explanations: dict[str, list[dict[str, Any]]] = {}
@@ -433,7 +425,7 @@ def predict_complications_with_shap(
                 "code": label,
                 "label": row["Осложнение"],
                 "probability": float(row["Вероятность"]),
-                "threshold": float(row["Порог"]),
+                "threshold": None if pd.isna(row["Порог"]) else float(row["Порог"]),
                 "prediction": row["Предсказание"],
                 "top_features": explanations.get(label, []),
             }
