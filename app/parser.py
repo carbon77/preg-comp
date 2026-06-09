@@ -177,7 +177,7 @@ def extract_screening_features(ocr_text: str) -> dict[str, Any]:
         "uapi_mean": find_number(
             text,
             [
-                r"маточные\s*артерии\s*,\s*пульсационный\s*индекс.*(?P<value>\d+(?:[\.,]\d+)?)"
+                r"маточные\s*артерии\s*,\s*пульсационный\s*индекс\s*:\s*(?P<value>\d+(?:[\.,]\d+)?)"
             ],
         ),
 
@@ -194,7 +194,7 @@ def extract_screening_features(ocr_text: str) -> dict[str, Any]:
         "map": find_number(
             text,
             [
-                r"артериальное\s*давление\s*,\s*среднее.*(?P<value>\d+(?:[\.,]\d+)?)",
+                r"артериальное\s*давление\s*,\s*среднее\s*:\s*(?P<value>\d+(?:[\.,]\d+)?)",
             ],
         ),
 
@@ -211,7 +211,7 @@ def extract_screening_features(ocr_text: str) -> dict[str, Any]:
         "cervix_length": find_number(
             text,
             [
-                r"длина\s*шейки.*(?P<value>\d+(?:[\.,]\d+)?)"
+                r"длина\s*шейки\s*:\s*(?P<value>\d+(?:[\.,]\d+)?)"
             ],
         ),
 
